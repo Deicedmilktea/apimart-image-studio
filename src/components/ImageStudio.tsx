@@ -411,6 +411,7 @@ export default function ImageStudio() {
       <HistoryPanel
         history={history}
         onClear={() => persistHistory([])}
+        onDelete={(id) => persistHistory(history.filter((h) => h.id !== id))}
         onSelect={(item) => {
           setImages(item.images);
           setSaved(item.saved ?? []);
@@ -590,26 +591,52 @@ function ResultArea({
 function HistoryPanel({
   history,
   onClear,
+  onDelete,
   onSelect,
   onDownload,
 }: {
   history: HistoryItem[];
   onClear: () => void;
+  onDelete: (id: string) => void;
   onSelect: (item: HistoryItem) => void;
   onDownload: (url: string, filename: string) => void;
 }) {
+  const [confirmClear, setConfirmClear] = useState(false);
   return (
     <aside className="flex w-full flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4 lg:w-72">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-medium text-white/70">历史记录</h2>
         {history.length > 0 ? (
-          <button
-            type="button"
-            onClick={onClear}
-            className="text-xs text-white/40 hover:text-white/70"
-          >
-            清空
-          </button>
+          confirmClear ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-white/40">确认清空？</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onClear();
+                  setConfirmClear(false);
+                }}
+                className="text-xs text-rose-300 hover:text-rose-200"
+              >
+                确认
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmClear(false)}
+                className="text-xs text-white/40 hover:text-white/70"
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmClear(true)}
+              className="text-xs text-white/40 hover:text-white/70"
+            >
+              清空
+            </button>
+          )
         ) : null}
       </div>
       {history.length === 0 ? (
@@ -623,7 +650,16 @@ function HistoryPanel({
               : undefined;
             const firstPrimary = firstLocal ?? firstUrl ?? "";
             return (
-            <li key={item.id} className="rounded-xl border border-white/5 bg-white/[0.02] p-2">
+            <li key={item.id} className="group relative rounded-xl border border-white/5 bg-white/[0.02] p-2">
+              <button
+                type="button"
+                onClick={() => onDelete(item.id)}
+                aria-label="删除这条记录"
+                title="删除"
+                className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/50 text-xs text-white/60 opacity-0 transition hover:bg-rose-500/80 hover:text-white group-hover:opacity-100"
+              >
+                ✕
+              </button>
               <button
                 type="button"
                 onClick={() => onSelect(item)}
