@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# APIMart 图片工作室
 
-## Getting Started
+一个像 ChatGPT 网页端那样的可视化生图页面：输入提示词 → 选择参数 → 点击生成 → 查看 / 下载图片。底层调用 [APIMart](https://docs.apimart.ai) 的 `gpt-image-2` 异步图片生成 API。
 
-First, run the development server:
+## 特性
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **文生图 / 图生图**：支持上传参考图（最多 16 张，自动转 base64）。
+- **模型与参数**：`gpt-image-2`（标准）/ `gpt-image-2-official`（官方通道）；可选比例（13 种）、分辨率（官方通道 1k/2k/4k）、官方通道回退。
+- **异步轮询**：提交后自动轮询任务状态，完成后展示图片。
+- **本地历史**：生成记录保存在浏览器 `localStorage`，可回看 / 下载。
+- **密钥安全**：API Key 只存在于服务端（Next.js Route Handler 代理），不会暴露给浏览器。
+
+## 架构
+
+```
+浏览器(UI) ──prompt──▶ /api/generate ──Bearer Key──▶ APIMart POST /v1/images/generations
+                          │                                          │
+                          ◀──────────────── task_id ─────────────────┘
+浏览器 ──轮询──▶ /api/task/[id] ──▶ APIMart GET /v1/tasks/{id} ──▶ 图片 URL ──▶ 展示
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- 服务端逻辑：`src/lib/apimart.ts`（提交、轮询、解析响应）。
+- API 路由：`src/app/api/generate/route.ts`、`src/app/api/task/[id]/route.ts`。
+- 前端：`src/components/ImageStudio.tsx`。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 本地运行
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cp .env.example .env.local   # 填入 APIMART_API_KEY
+npm install
+npm run dev                  # http://localhost:3000
+```
 
-## Learn More
+## 环境变量
 
-To learn more about Next.js, take a look at the following resources:
+| 变量 | 必填 | 说明 |
+| --- | --- | --- |
+| `APIMART_API_KEY` | 是 | APIMart API Key |
+| `APIMART_BASE_URL` | 否 | 默认 `https://api.apimart.ai/v1` |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 部署到 Vercel
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+导入仓库后，在 Project Settings → Environment Variables 中添加 `APIMART_API_KEY` 即可。
 
-## Deploy on Vercel
+## 说明
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- APIMart 生成的图片链接 **24 小时内有效**，请及时下载保存。
+- `gpt-image-2` 比例不要传 `auto`；想用默认比例就不选（留空）。
+- 分辨率 `4k` 仅支持 `16:9 / 9:16 / 2:1 / 1:2 / 21:9 / 9:21`，且只在官方通道模型下可用。
