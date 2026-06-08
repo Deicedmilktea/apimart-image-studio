@@ -34,6 +34,9 @@ yarn-error.log*
 .env*
 !.env.example
 
+# generated images (server-side auto-save output)
+/generated
+
 # vercel
 .vercel
 

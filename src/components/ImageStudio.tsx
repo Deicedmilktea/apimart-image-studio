@@ -16,6 +16,7 @@ import type {
   GenerateResponse,
   HistoryItem,
   ReferenceImage,
+  SavedImageInfo,
   TaskResponse,
 } from "@/lib/types";
 
@@ -68,6 +69,8 @@ export default function ImageStudio() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [statusText, setStatusText] = useState<string>("");
   const [images, setImages] = useState<string[]>([]);
+  const [saved, setSaved] = useState<SavedImageInfo[]>([]);
+  const [savedDir, setSavedDir] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
 
@@ -127,6 +130,8 @@ export default function ImageStudio() {
     setPhase("idle");
     setError("");
     setStatusText("");
+    setSaved([]);
+    setSavedDir("");
   };
 
   const generate = useCallback(async () => {
@@ -136,6 +141,8 @@ export default function ImageStudio() {
     cancelRef.current = false;
     setError("");
     setImages([]);
+    setSaved([]);
+    setSavedDir("");
     setPhase("submitting");
     setStatusText("正在提交任务…");
 
@@ -179,7 +186,11 @@ export default function ImageStudio() {
         if (status === "completed") {
           const urls = task.images ?? [];
           if (urls.length === 0) throw new Error("任务完成但没有返回图片 URL。");
+          const savedFiles = task.saved ?? [];
+          const dir = task.savedDir ?? "";
           setImages(urls);
+          setSaved(savedFiles);
+          setSavedDir(dir);
           setPhase("done");
           setStatusText("");
           persistHistory([
@@ -190,6 +201,8 @@ export default function ImageStudio() {
               size: size || undefined,
               images: urls,
               createdAt: Date.now(),
+              savedDir: dir || undefined,
+              saved: savedFiles.length > 0 ? savedFiles : undefined,
             },
             ...history.filter((h) => h.id !== taskId),
           ]);
@@ -223,7 +236,14 @@ export default function ImageStudio() {
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:flex-row">
       {/* Main column */}
       <div className="flex flex-1 flex-col gap-5">
-        <ResultArea phase={phase} statusText={statusText} error={error} images={images} />
+        <ResultArea
+          phase={phase}
+          statusText={statusText}
+          error={error}
+          images={images}
+          saved={saved}
+          savedDir={savedDir}
+        />
 
         {/* Composer */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-lg">
@@ -355,6 +375,8 @@ export default function ImageStudio() {
         onClear={() => persistHistory([])}
         onSelect={(item) => {
           setImages(item.images);
+          setSaved(item.saved ?? []);
+          setSavedDir(item.savedDir ?? "");
           setPrompt(item.prompt);
           setPhase("done");
           setError("");
@@ -442,11 +464,15 @@ function ResultArea({
   statusText,
   error,
   images,
+  saved,
+  savedDir,
 }: {
   phase: Phase;
   statusText: string;
   error: string;
   images: string[];
+  saved: SavedImageInfo[];
+  savedDir: string;
 }) {
   return (
     <div className="flex min-h-[320px] flex-1 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4">
@@ -463,26 +489,50 @@ function ResultArea({
           <p className="text-sm">{statusText}</p>
         </div>
       ) : images.length > 0 ? (
-        <div
-          className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2"
-          data-testid="result-grid"
-        >
-          {images.map((url, i) => (
-            <a
-              key={`${url}-${i}`}
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
+        <div className="flex flex-1 flex-col gap-3">
+          <div
+            className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2"
+            data-testid="result-grid"
+          >
+            {images.map((url, i) => (
+              <a
+                key={`${url}-${i}`}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt={`生成结果 ${i + 1}`}
+                  className="h-full w-full object-contain transition group-hover:scale-[1.01]"
+                />
+              </a>
+            ))}
+          </div>
+          {saved.length > 0 ? (
+            <div
+              className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-200/90"
+              data-testid="saved-note"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={url}
-                alt={`生成结果 ${i + 1}`}
-                className="h-full w-full object-contain transition group-hover:scale-[1.01]"
-              />
-            </a>
-          ))}
+              <p className="font-medium">
+                已自动保存 {saved.length} 张图片到服务器：
+              </p>
+              {savedDir ? (
+                <p className="mt-1 break-all text-emerald-200/70">
+                  目录：<code>{savedDir}</code>
+                </p>
+              ) : null}
+              <ul className="mt-1 space-y-0.5 text-emerald-200/70">
+                {saved.map((s) => (
+                  <li key={s.filename} className="break-all">
+                    · {s.filename}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-white/30">

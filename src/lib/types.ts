@@ -6,11 +6,18 @@ export interface GenerateResponse {
   error?: string;
 }
 
+export interface SavedImageInfo {
+  filename: string;
+  path: string;
+}
+
 export interface TaskResponse {
   taskId?: string;
   status?: string;
   images?: string[];
   error?: string;
+  saved?: SavedImageInfo[];
+  savedDir?: string;
 }
 
 export interface ReferenceImage {
@@ -26,4 +33,6 @@ export interface HistoryItem {
   size?: string;
   images: string[];
   createdAt: number;
+  savedDir?: string;
+  saved?: SavedImageInfo[];
 }
