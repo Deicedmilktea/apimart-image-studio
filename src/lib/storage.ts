@@ -4,11 +4,9 @@
 
 import { access, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { SavedImageInfo } from "@/lib/types";
 
-export interface SavedImageInfo {
-  filename: string;
-  path: string;
-}
+export type { SavedImageInfo };
 
 // Output directory for saved images. Configurable via APIMART_OUTPUT_DIR;
 // relative paths resolve against the project root (process.cwd()).
@@ -58,7 +56,7 @@ export async function saveImages(
         const buffer = Buffer.from(await res.arrayBuffer());
         await writeFile(filePath, buffer);
       }
-      saved.push({ filename, path: filePath });
+      saved.push({ filename, path: filePath, url });
     } catch {
       // Skip this image; keep trying the others.
     }

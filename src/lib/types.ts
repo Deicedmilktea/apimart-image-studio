@@ -9,6 +9,7 @@ export interface GenerateResponse {
 export interface SavedImageInfo {
   filename: string;
   path: string;
+  url: string;
 }
 
 export interface TaskResponse {

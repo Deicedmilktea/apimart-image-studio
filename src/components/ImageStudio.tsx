@@ -58,6 +58,44 @@ async function downloadImage(url: string, filename: string) {
   }
 }
 
+// Local readback URL for an image that was auto-saved on the server, matched by
+// its original APIMart URL. Returns undefined if no local copy is known.
+function localUrlForImage(
+  url: string,
+  saved?: SavedImageInfo[],
+): string | undefined {
+  const match = saved?.find((s) => s.url === url);
+  return match ? `/api/image/${encodeURIComponent(match.filename)}` : undefined;
+}
+
+// <img> that prefers a primary src (e.g. the local file) and falls back to a
+// secondary src (the online URL) if the primary fails to load. Callers should
+// pass a stable `key` so state resets when the primary changes.
+function PreviewImg({
+  primary,
+  fallback,
+  alt,
+  className,
+}: {
+  primary: string;
+  fallback: string;
+  alt: string;
+  className?: string;
+}) {
+  const [src, setSrc] = useState(primary);
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      onError={() => {
+        if (src !== fallback) setSrc(fallback);
+      }}
+    />
+  );
+}
+
 export default function ImageStudio() {
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ImageModel>(STANDARD_IMAGE_MODEL);
@@ -494,22 +532,27 @@ function ResultArea({
             className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2"
             data-testid="result-grid"
           >
-            {images.map((url, i) => (
-              <a
-                key={`${url}-${i}`}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={url}
-                  alt={`生成结果 ${i + 1}`}
-                  className="h-full w-full object-contain transition group-hover:scale-[1.01]"
-                />
-              </a>
-            ))}
+            {images.map((url, i) => {
+              const local = localUrlForImage(url, saved);
+              const primary = local ?? url;
+              return (
+                <a
+                  key={`${url}-${i}`}
+                  href={primary}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
+                >
+                  <PreviewImg
+                    key={primary}
+                    primary={primary}
+                    fallback={url}
+                    alt={`生成结果 ${i + 1}`}
+                    className="h-full w-full object-contain transition group-hover:scale-[1.01]"
+                  />
+                </a>
+              );
+            })}
           </div>
           {saved.length > 0 ? (
             <div
@@ -573,17 +616,24 @@ function HistoryPanel({
         <p className="text-xs text-white/30">这里会显示你生成过的图片。</p>
       ) : (
         <ul className="flex flex-col gap-3 overflow-y-auto">
-          {history.map((item) => (
+          {history.map((item) => {
+            const firstUrl = item.images[0];
+            const firstLocal = firstUrl
+              ? localUrlForImage(firstUrl, item.saved)
+              : undefined;
+            const firstPrimary = firstLocal ?? firstUrl ?? "";
+            return (
             <li key={item.id} className="rounded-xl border border-white/5 bg-white/[0.02] p-2">
               <button
                 type="button"
                 onClick={() => onSelect(item)}
                 className="block w-full text-left"
               >
-                {item.images[0] ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={item.images[0]}
+                {firstUrl ? (
+                  <PreviewImg
+                    key={firstPrimary}
+                    primary={firstPrimary}
+                    fallback={firstUrl}
                     alt={item.prompt}
                     className="mb-2 h-24 w-full rounded-lg object-cover"
                   />
@@ -594,10 +644,12 @@ function HistoryPanel({
                 <span className="text-[10px] text-white/30">
                   {new Date(item.createdAt).toLocaleString()}
                 </span>
-                {item.images[0] ? (
+                {firstUrl ? (
                   <button
                     type="button"
-                    onClick={() => onDownload(item.images[0], `apimart-${item.id}.png`)}
+                    onClick={() =>
+                      onDownload(firstPrimary, `apimart-${item.id}.png`)
+                    }
                     className="text-[10px] text-indigo-300 hover:text-indigo-200"
                   >
                     下载
@@ -605,7 +657,8 @@ function HistoryPanel({
                 ) : null}
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </aside>
