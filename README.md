@@ -5,7 +5,7 @@
 当前支持两条生成链路：
 
 - [APIMart](https://docs.apimart.ai) 的 `gpt-image-2` 异步图片生成 API
-- local_imagen，自定义 `URL + Key`（提供image2模型的中转站使用） 的 OpenAI 兼容服务，经过 TypeScript 包装器转调官方 `image_gen.py`
+- 自定义 `URL + Key` 的 OpenAI 兼容服务，经过 TypeScript 包装器转调官方 `image_gen.py`
 
 ## 界面预览
 
@@ -42,8 +42,18 @@
 ```bash
 cp .env.example .env.local
 npm install
+uv sync
 npm run dev                  # http://localhost:3000
 ```
+
+如果你只使用 APIMart，可以不执行 `uv sync`。  
+如果你要启用 `自定义 URL/Key`，建议把 Python 依赖也准备好：
+
+```bash
+uv sync
+```
+
+这会在项目根目录创建 `.venv/`，并安装本项目声明的 Python 依赖（当前为 `openai` 和 `pillow`）。
 
 ## 环境变量
 
@@ -67,6 +77,45 @@ npm run dev                  # http://localhost:3000
 - `LOCAL_IMAGEGEN_API_KEY`
 - 如有需要，再配置 `OFFICIAL_IMAGEGEN_PATH`
 
+并确保部署环境在构建前执行过：
+
+```bash
+uv sync
+```
+
+如果你是自托管部署，推荐在启动前先执行：
+
+```bash
+npm install
+uv sync
+npm run build
+npm run start
+```
+
+注意：Vercel 这类无持久文件系统平台并不适合依赖本地文件产物的长期保存；自定义 URL/Key + 官方 `image_gen.py` 更推荐用于本地或自托管环境。
+
+## Python 依赖与 `uv`
+
+项目根目录包含一个 `pyproject.toml`，专门声明 `local-imagegen` 所需的 Python 依赖：
+
+- `openai`
+- `pillow`
+
+服务端调用 `image_gen.py` 时，运行顺序如下：
+
+1. 优先使用项目根目录 `.venv/bin/python`
+2. 再尝试官方 imagegen skill 自带的 `.venv`
+3. 如果仓库存在 `pyproject.toml` 且系统安装了 `uv`，则使用 `uv run python3`
+4. 最后才回退到一次性的 `uv run --with openai --with pillow python3`
+
+也就是说，开源使用时的推荐方式不是依赖临时回退，而是：
+
+```bash
+uv sync
+```
+
+把 Python 环境作为项目依赖的一部分固定下来。
+
 ## 说明
 
 - APIMart 生成的图片链接 **24 小时内有效**；本应用会在任务完成时自动把图片保存到服务端 `IMAGE_STUDIO_OUTPUT_DIR`（默认 `generated/`），即使链接过期本地副本仍在。该目录已加入 `.gitignore`，不会被提交。
@@ -75,3 +124,4 @@ npm run dev                  # http://localhost:3000
 - 分辨率 `4k` 仅支持 `16:9 / 9:16 / 2:1 / 1:2 / 21:9 / 9:21`，且只在官方通道模型下可用。
 - 自定义 URL/Key 模式会把比例映射成固定尺寸，再传给官方 `image_gen.py`。首版禁用 `21:9` 和 `9:21`。
 - 自定义 URL/Key 模式当前只暴露最小参数集：`prompt / 参考图 / 比例 / quality`。
+- 如果你启用了自定义 URL/Key，但没有准备 Python 依赖，服务端会优先提示你执行 `uv sync`。

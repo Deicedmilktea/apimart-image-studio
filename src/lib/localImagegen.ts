@@ -138,6 +138,7 @@ async function resolveOfficialImagegenPath(): Promise<string> {
 async function commandHasOpenAI(command: string, args: string[] = []): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(command, [...args, "-c", "import openai"], {
+      cwd: /* turbopackIgnore: true */ process.cwd(),
       stdio: ["ignore", "ignore", "ignore"],
     });
 
@@ -146,14 +147,34 @@ async function commandHasOpenAI(command: string, args: string[] = []): Promise<b
   });
 }
 
+async function commandExists(command: string, args: string[] = ["--version"]): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: /* turbopackIgnore: true */ process.cwd(),
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => resolve(code === 0));
+  });
+}
+
+async function hasProjectUvConfig(): Promise<boolean> {
+  const projectRoot = /* turbopackIgnore: true */ process.cwd();
+  try {
+    await access(path.join(projectRoot, "pyproject.toml"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function resolvePythonRuntime(): Promise<PythonRuntime> {
   const candidates = [
     path.join(process.cwd(), ".venv", "bin", "python"),
     path.join(process.cwd(), ".venv", "bin", "python3"),
     path.join(os.homedir(), ".codex", "skills", ".system", "imagegen", ".venv", "bin", "python"),
     path.join(os.homedir(), ".codex", "skills", ".system", "imagegen", ".venv", "bin", "python3"),
-    "python3",
-    "python",
   ];
 
   for (const command of candidates) {
@@ -162,17 +183,30 @@ async function resolvePythonRuntime(): Promise<PythonRuntime> {
     }
   }
 
-  const uvAvailable = await commandHasOpenAI("uv", ["run", "--with", "openai", "python3"]);
-  if (uvAvailable) {
+  if (await commandExists("uv")) {
+    if (await hasProjectUvConfig() && await commandHasOpenAI("uv", ["run", "python3"])) {
+      return {
+        command: "uv",
+        args: ["run", "python3"],
+        description: "uv run python3",
+      };
+    }
+
     return {
       command: "uv",
-      args: ["run", "--with", "openai", "python3"],
-      description: "uv run --with openai python3",
+      args: ["run", "--with", "openai", "--with", "pillow", "python3"],
+      description: "uv run --with openai --with pillow python3",
     };
   }
 
+  for (const command of ["python3", "python"]) {
+    if (await commandHasOpenAI(command)) {
+      return { command, args: [], description: command };
+    }
+  }
+
   throw new LocalImagegenError(
-    "当前环境缺少 openai SDK，且自动回退到 `uv run --with openai python3` 也失败了。请先安装 openai，或提供可用的 Python 解释器。",
+    "当前环境缺少 openai SDK。请先运行 `uv sync`，或提供可用的 Python 解释器。",
     500,
   );
 }
