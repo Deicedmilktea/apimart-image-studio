@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "APIMart 图片工作室",
-  description: "基于 APIMart GPT-Image-2 的可视化生图页面",
+  title: "图片工作室",
+  description: "支持 APIMart 与自定义 URL/Key 的可视化生图页面",
 };
 
 export default function RootLayout({

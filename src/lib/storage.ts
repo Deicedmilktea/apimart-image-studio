@@ -8,13 +8,26 @@ import type { SavedImageInfo } from "@/lib/types";
 
 export type { SavedImageInfo };
 
-// Output directory for saved images. Configurable via APIMART_OUTPUT_DIR;
+// Output directory for saved images. Configurable via IMAGE_STUDIO_OUTPUT_DIR;
 // relative paths resolve against the project root (process.cwd()).
 export function getOutputDir(): string {
-  const configured = process.env.APIMART_OUTPUT_DIR?.trim() || "generated";
+  const configured =
+    process.env.IMAGE_STUDIO_OUTPUT_DIR?.trim() ||
+    process.env.APIMART_OUTPUT_DIR?.trim() ||
+    "generated";
   return path.isAbsolute(configured)
     ? configured
     : path.join(/* turbopackIgnore: true */ process.cwd(), configured);
+}
+
+export async function ensureOutputDir(): Promise<string> {
+  const dir = getOutputDir();
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
+export function buildLocalImageUrl(filename: string): string {
+  return `/api/image/${encodeURIComponent(filename)}`;
 }
 
 function extFromUrl(url: string): string {
@@ -41,8 +54,7 @@ export async function saveImages(
   taskId: string,
   urls: string[],
 ): Promise<SavedImageInfo[]> {
-  const dir = getOutputDir();
-  await mkdir(dir, { recursive: true });
+  const dir = await ensureOutputDir();
 
   const saved: SavedImageInfo[] = [];
   for (let i = 0; i < urls.length; i++) {

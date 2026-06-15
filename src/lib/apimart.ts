@@ -13,6 +13,7 @@ import {
   type ImageResolution,
   type ImageSize,
 } from "@/lib/constants";
+import type { GenerateRequest } from "@/lib/types";
 
 export const DEFAULT_BASE_URL = "https://api.apimart.ai/v1";
 
@@ -36,15 +37,6 @@ export interface GeneratePayload {
   image_urls?: string[];
   official_fallback?: boolean;
   resolution?: ImageResolution;
-}
-
-export interface GenerateRequest {
-  prompt: string;
-  model?: string;
-  size?: string;
-  imageUrls?: string[];
-  officialFallback?: boolean;
-  resolution?: string;
 }
 
 function getBaseUrl(): string {

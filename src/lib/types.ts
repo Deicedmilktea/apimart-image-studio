@@ -1,9 +1,24 @@
-import type { ImageModel } from "@/lib/constants";
+import type { ImageModel, ImageProvider, LocalImageQuality } from "@/lib/constants";
+
+export interface GenerateRequest {
+  provider?: ImageProvider;
+  prompt: string;
+  model?: string;
+  size?: string;
+  imageUrls?: string[];
+  officialFallback?: boolean;
+  resolution?: string;
+  quality?: string;
+}
 
 export interface GenerateResponse {
   taskId?: string;
   status?: string;
   error?: string;
+  images?: string[];
+  saved?: SavedImageInfo[];
+  savedDir?: string;
+  provider?: ImageProvider;
 }
 
 export interface SavedImageInfo {
@@ -19,6 +34,7 @@ export interface TaskResponse {
   error?: string;
   saved?: SavedImageInfo[];
   savedDir?: string;
+  provider?: ImageProvider;
 }
 
 export interface ReferenceImage {
@@ -30,7 +46,10 @@ export interface ReferenceImage {
 export interface HistoryItem {
   id: string;
   prompt: string;
-  model: ImageModel;
+  provider: ImageProvider;
+  model?: ImageModel;
+  modelLabel?: string;
+  quality?: LocalImageQuality;
   size?: string;
   images: string[];
   createdAt: number;

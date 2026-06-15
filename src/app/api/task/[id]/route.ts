@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { ApimartError, getTaskStatus } from "@/lib/apimart";
+import { APIMART_PROVIDER } from "@/lib/constants";
 import { getOutputDir, saveImages, type SavedImageInfo } from "@/lib/storage";
 
 export const runtime = "nodejs";
@@ -31,6 +32,7 @@ export async function GET(
       error: result.error,
       saved,
       savedDir,
+      provider: APIMART_PROVIDER,
     });
   } catch (err) {
     if (err instanceof ApimartError) {

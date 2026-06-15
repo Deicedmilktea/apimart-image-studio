@@ -2,15 +2,25 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  APIMART_PROVIDER,
+  DEFAULT_LOCAL_IMAGEGEN_QUALITY,
   FOUR_K_SUPPORTED_SIZES,
+  LOCAL_IMAGEGEN_DISABLED_SIZES,
+  LOCAL_IMAGEGEN_MODEL_LABEL,
+  LOCAL_IMAGEGEN_MODEL_HINT,
+  LOCAL_IMAGEGEN_PROVIDER,
+  LOCAL_IMAGEGEN_QUALITIES,
   MAX_REFERENCE_IMAGES,
   MODEL_LABELS,
   OFFICIAL_IMAGE_MODEL,
+  PROVIDER_LABELS,
   STANDARD_IMAGE_MODEL,
   SUPPORTED_MODELS,
   SUPPORTED_RESOLUTIONS,
   SUPPORTED_SIZES,
   type ImageModel,
+  type ImageProvider,
+  type LocalImageQuality,
 } from "@/lib/constants";
 import type {
   GenerateResponse,
@@ -96,12 +106,23 @@ function PreviewImg({
   );
 }
 
+function sanitizeLocalImagegenSize(size?: string): string {
+  if (!size) return "";
+  return LOCAL_IMAGEGEN_DISABLED_SIZES.includes(
+    size as (typeof LOCAL_IMAGEGEN_DISABLED_SIZES)[number],
+  )
+    ? ""
+    : size;
+}
+
 export default function ImageStudio() {
   const [prompt, setPrompt] = useState("");
+  const [provider, setProvider] = useState<ImageProvider>(APIMART_PROVIDER);
   const [model, setModel] = useState<ImageModel>(STANDARD_IMAGE_MODEL);
   const [size, setSize] = useState<string>("");
   const [resolution, setResolution] = useState<string>("");
   const [officialFallback, setOfficialFallback] = useState(true);
+  const [quality, setQuality] = useState<LocalImageQuality>(DEFAULT_LOCAL_IMAGEGEN_QUALITY);
   const [references, setReferences] = useState<ReferenceImage[]>([]);
 
   const [phase, setPhase] = useState<Phase>("idle");
@@ -123,7 +144,15 @@ export default function ImageStudio() {
       if (cancelled) return;
       try {
         const raw = localStorage.getItem(HISTORY_KEY);
-        if (raw) setHistory(JSON.parse(raw) as HistoryItem[]);
+        if (raw) {
+          const parsed = JSON.parse(raw) as HistoryItem[];
+          setHistory(
+            parsed.map((item) => ({
+              ...item,
+              provider: item.provider ?? APIMART_PROVIDER,
+            })),
+          );
+        }
       } catch {
         // Ignore malformed history.
       }
@@ -143,6 +172,8 @@ export default function ImageStudio() {
   }, []);
 
   const isOfficial = model === OFFICIAL_IMAGE_MODEL;
+  const isApimart = provider === APIMART_PROVIDER;
+  const isLocalImagegen = provider === LOCAL_IMAGEGEN_PROVIDER;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const handleReferenceFiles = async (files: FileList | null) => {
@@ -189,17 +220,49 @@ export default function ImageStudio() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          provider,
           prompt: trimmed,
-          model,
+          model: isApimart ? model : undefined,
           size: size || undefined,
-          resolution: isOfficial ? resolution || undefined : undefined,
-          officialFallback: isOfficial ? undefined : officialFallback,
+          resolution: isApimart && isOfficial ? resolution || undefined : undefined,
+          officialFallback: isApimart && !isOfficial ? officialFallback : undefined,
+          quality: isLocalImagegen ? quality : undefined,
           imageUrls: references.map((r) => r.dataUrl),
         }),
       });
       const data = (await res.json()) as GenerateResponse;
       if (!res.ok || !data.taskId) {
         throw new Error(data.error || `提交失败 (HTTP ${res.status})`);
+      }
+      if (cancelRef.current) return;
+
+      if (data.status === "completed") {
+        const urls = data.images ?? [];
+        if (urls.length === 0) throw new Error("任务完成但没有返回图片 URL。");
+        const savedFiles = data.saved ?? [];
+        const dir = data.savedDir ?? "";
+        setImages(urls);
+        setSaved(savedFiles);
+        setSavedDir(dir);
+        setPhase("done");
+        setStatusText("");
+        persistHistory([
+          {
+            id: data.taskId,
+            prompt: trimmed,
+            provider,
+            model: isApimart ? model : undefined,
+            modelLabel: isApimart ? MODEL_LABELS[model] : LOCAL_IMAGEGEN_MODEL_LABEL,
+            quality: isLocalImagegen ? quality : undefined,
+            size: size || undefined,
+            images: urls,
+            createdAt: Date.now(),
+            savedDir: dir || undefined,
+            saved: savedFiles.length > 0 ? savedFiles : undefined,
+          },
+          ...history.filter((h) => h.id !== data.taskId),
+        ]);
+        return;
       }
 
       const taskId = data.taskId;
@@ -235,7 +298,9 @@ export default function ImageStudio() {
             {
               id: taskId,
               prompt: trimmed,
+              provider,
               model,
+              modelLabel: MODEL_LABELS[model],
               size: size || undefined,
               images: urls,
               createdAt: Date.now(),
@@ -260,11 +325,15 @@ export default function ImageStudio() {
   }, [
     prompt,
     busy,
+    provider,
     model,
     size,
     resolution,
     isOfficial,
+    isApimart,
+    isLocalImagegen,
     officialFallback,
+    quality,
     references,
     history,
     persistHistory,
@@ -308,21 +377,59 @@ export default function ImageStudio() {
           />
 
           <div className="mt-3 flex flex-wrap items-end gap-3">
-            <Field label="模型">
+            <Field label="通道">
               <select
-                value={model}
-                onChange={(e) => setModel(e.target.value as ImageModel)}
+                value={provider}
+                onChange={(e) => {
+                  const nextProvider = e.target.value as ImageProvider;
+                  setProvider(nextProvider);
+                  if (nextProvider === LOCAL_IMAGEGEN_PROVIDER) {
+                    setSize((current) => sanitizeLocalImagegenSize(current));
+                  }
+                }}
                 disabled={busy}
                 className="select"
-                data-testid="model-select"
+                data-testid="provider-select"
               >
-                {SUPPORTED_MODELS.map((m) => (
-                  <option key={m} value={m} className="bg-zinc-900">
-                    {MODEL_LABELS[m]}
+                {Object.entries(PROVIDER_LABELS).map(([value, label]) => (
+                  <option key={value} value={value} className="bg-zinc-900">
+                    {label}
                   </option>
                 ))}
               </select>
             </Field>
+
+            {isApimart ? (
+              <Field label="模型">
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value as ImageModel)}
+                  disabled={busy}
+                  className="select"
+                  data-testid="model-select"
+                >
+                  {SUPPORTED_MODELS.map((m) => (
+                    <option key={m} value={m} className="bg-zinc-900">
+                      {MODEL_LABELS[m]}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ) : (
+              <Field label="模型">
+                <select
+                  value={LOCAL_IMAGEGEN_MODEL_LABEL}
+                  disabled
+                  className="select w-[10.5rem] max-w-[calc(100vw-4rem)]"
+                  data-testid="local-imagegen-model"
+                  title={LOCAL_IMAGEGEN_MODEL_HINT}
+                >
+                  <option value={LOCAL_IMAGEGEN_MODEL_LABEL} className="bg-zinc-900">
+                    {LOCAL_IMAGEGEN_MODEL_LABEL}
+                  </option>
+                </select>
+              </Field>
+            )}
 
             <Field label="比例">
               <select
@@ -336,14 +443,40 @@ export default function ImageStudio() {
                   默认
                 </option>
                 {SUPPORTED_SIZES.map((s) => (
-                  <option key={s} value={s} className="bg-zinc-900">
+                  <option
+                    key={s}
+                    value={s}
+                    disabled={
+                      isLocalImagegen &&
+                      LOCAL_IMAGEGEN_DISABLED_SIZES.includes(
+                        s as (typeof LOCAL_IMAGEGEN_DISABLED_SIZES)[number],
+                      )
+                    }
+                    className="bg-zinc-900"
+                  >
                     {s}
                   </option>
                 ))}
               </select>
             </Field>
 
-            {isOfficial ? (
+            {isLocalImagegen ? (
+              <Field label="质量">
+                <select
+                  value={quality}
+                  onChange={(e) => setQuality(e.target.value as LocalImageQuality)}
+                  disabled={busy}
+                  className="select"
+                  data-testid="quality-select"
+                >
+                  {LOCAL_IMAGEGEN_QUALITIES.map((item) => (
+                    <option key={item} value={item} className="bg-zinc-900">
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ) : isOfficial ? (
               <Field label="分辨率">
                 <select
                   value={resolution}
@@ -402,7 +535,10 @@ export default function ImageStudio() {
             </div>
           </div>
           <p className="mt-2 text-xs text-white/30">
-            提示：Ctrl / ⌘ + Enter 快速生成。图片链接 24 小时内有效，请及时下载。
+            提示：Ctrl / ⌘ + Enter 快速生成。
+            {isLocalImagegen
+              ? " 自定义 URL/Key 会固定调用官方 imagegen 脚本，并把比例映射成固定尺寸，21:9 和 9:21 暂不可用。"
+              : " 图片链接 24 小时内有效，请及时下载。"}
           </p>
         </div>
       </div>
@@ -417,6 +553,17 @@ export default function ImageStudio() {
           setSaved(item.saved ?? []);
           setSavedDir(item.savedDir ?? "");
           setPrompt(item.prompt);
+          setProvider(item.provider);
+          setSize(
+            item.provider === LOCAL_IMAGEGEN_PROVIDER
+              ? sanitizeLocalImagegenSize(item.size)
+              : item.size ?? "",
+          );
+          if (item.provider === APIMART_PROVIDER) {
+            if (item.model) setModel(item.model);
+          } else if (item.quality) {
+            setQuality(item.quality);
+          }
           setPhase("done");
           setError("");
         }}
@@ -426,11 +573,15 @@ export default function ImageStudio() {
       {/* Component-scoped utility classes */}
       <style>{`
         .select {
+          box-sizing: border-box;
+          height: 1.525rem;
+          min-height: 2.25rem;
           border-radius: 0.5rem;
           border: 1px solid rgba(255,255,255,0.15);
           background: rgba(255,255,255,0.03);
-          padding: 0.4rem 0.6rem;
+          padding: 0 0.55rem;
           font-size: 0.875rem;
+          line-height: 1rem;
           color: inherit;
           outline: none;
         }
@@ -682,14 +833,21 @@ function HistoryPanel({
                   </p>
                 </button>
                 <div className="mt-1 flex items-center justify-between">
-                  <span className="text-[10px] text-white/30">
-                    {new Date(item.createdAt).toLocaleString()}
-                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-white/40">
+                      {PROVIDER_LABELS[item.provider]}
+                      {item.modelLabel ? ` · ${item.modelLabel}` : ""}
+                      {item.quality ? ` · ${item.quality}` : ""}
+                    </span>
+                    <span className="text-[10px] text-white/30">
+                      {new Date(item.createdAt).toLocaleString()}
+                    </span>
+                  </div>
                   {firstUrl ? (
                     <button
                       type="button"
                       onClick={() =>
-                        onDownload(firstPrimary, `apimart-${item.id}.png`)
+                        onDownload(firstPrimary, `image-studio-${item.provider}-${item.id}.png`)
                       }
                       className="text-[10px] text-indigo-300 hover:text-indigo-200"
                     >
