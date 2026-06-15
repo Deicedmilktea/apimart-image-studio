@@ -2,6 +2,10 @@
 
 一个像 ChatGPT 网页端那样的可视化生图页面：输入提示词 → 选择参数 → 点击生成 → 查看 / 下载图片。底层调用 [APIMart](https://docs.apimart.ai) 的 `gpt-image-2` 异步图片生成 API。
 
+## 界面预览
+
+![APIMart 图片工作室界面预览](public/readme-preview.png)
+
 ## 特性
 
 - **文生图 / 图生图**：支持上传参考图（最多 16 张，自动转 base64）。
