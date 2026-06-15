@@ -271,7 +271,7 @@ export default function ImageStudio() {
   ]);
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:flex-row">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:flex-row lg:items-start">
       {/* Main column */}
       <div className="flex flex-1 flex-col gap-5">
         <ResultArea
@@ -514,7 +514,7 @@ function ResultArea({
   savedDir: string;
 }) {
   return (
-    <div className="flex min-h-[320px] flex-1 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+    <div className="flex min-h-[430px] flex-1 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4">
       {phase === "error" ? (
         <div
           className="flex flex-1 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center text-sm text-red-300"
@@ -603,7 +603,7 @@ function HistoryPanel({
 }) {
   const [confirmClear, setConfirmClear] = useState(false);
   return (
-    <aside className="flex w-full flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4 lg:w-72">
+    <aside className="flex w-full flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4 lg:w-72 lg:self-start">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-medium text-white/70">历史记录</h2>
         {history.length > 0 ? (
@@ -642,7 +642,7 @@ function HistoryPanel({
       {history.length === 0 ? (
         <p className="text-xs text-white/30">这里会显示你生成过的图片。</p>
       ) : (
-        <ul className="flex flex-col gap-3 overflow-y-auto">
+        <ul className="flex max-h-[calc(100dvh-12rem)] flex-col gap-3 overflow-y-auto pr-1">
           {history.map((item) => {
             const firstUrl = item.images[0];
             const firstLocal = firstUrl
@@ -650,49 +650,54 @@ function HistoryPanel({
               : undefined;
             const firstPrimary = firstLocal ?? firstUrl ?? "";
             return (
-            <li key={item.id} className="group relative rounded-xl border border-white/5 bg-white/[0.02] p-2">
-              <button
-                type="button"
-                onClick={() => onDelete(item.id)}
-                aria-label="删除这条记录"
-                title="删除"
-                className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/50 text-xs text-white/60 opacity-0 transition hover:bg-rose-500/80 hover:text-white group-hover:opacity-100"
+              <li
+                key={item.id}
+                className="group relative rounded-xl border border-white/5 bg-white/[0.02] p-2"
               >
-                ✕
-              </button>
-              <button
-                type="button"
-                onClick={() => onSelect(item)}
-                className="block w-full text-left"
-              >
-                {firstUrl ? (
-                  <PreviewImg
-                    key={firstPrimary}
-                    primary={firstPrimary}
-                    fallback={firstUrl}
-                    alt={item.prompt}
-                    className="mb-2 h-24 w-full rounded-lg object-cover"
-                  />
-                ) : null}
-                <p className="line-clamp-2 text-xs text-white/60">{item.prompt}</p>
-              </button>
-              <div className="mt-1 flex items-center justify-between">
-                <span className="text-[10px] text-white/30">
-                  {new Date(item.createdAt).toLocaleString()}
-                </span>
-                {firstUrl ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onDownload(firstPrimary, `apimart-${item.id}.png`)
-                    }
-                    className="text-[10px] text-indigo-300 hover:text-indigo-200"
-                  >
-                    下载
-                  </button>
-                ) : null}
-              </div>
-            </li>
+                <button
+                  type="button"
+                  onClick={() => onDelete(item.id)}
+                  aria-label="删除这条记录"
+                  title="删除"
+                  className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/50 text-xs text-white/60 opacity-0 transition hover:bg-rose-500/80 hover:text-white group-hover:opacity-100"
+                >
+                  ✕
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSelect(item)}
+                  className="block w-full text-left"
+                >
+                  {firstUrl ? (
+                    <PreviewImg
+                      key={firstPrimary}
+                      primary={firstPrimary}
+                      fallback={firstUrl}
+                      alt={item.prompt}
+                      className="mb-2 h-24 w-full rounded-lg object-cover"
+                    />
+                  ) : null}
+                  <p className="line-clamp-2 text-xs text-white/60">
+                    {item.prompt}
+                  </p>
+                </button>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className="text-[10px] text-white/30">
+                    {new Date(item.createdAt).toLocaleString()}
+                  </span>
+                  {firstUrl ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onDownload(firstPrimary, `apimart-${item.id}.png`)
+                      }
+                      className="text-[10px] text-indigo-300 hover:text-indigo-200"
+                    >
+                      下载
+                    </button>
+                  ) : null}
+                </div>
+              </li>
             );
           })}
         </ul>
