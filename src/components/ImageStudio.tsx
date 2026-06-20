@@ -793,7 +793,7 @@ function SettingsModal({
             </label>
           </div>
           <p className="mt-2 text-xs text-white/30">
-            需要接口支持浏览器跨域 (CORS)。请求会发到 <code>{"{Base URL}"}/images/generations</code>（或图生图的 <code>/images/edits</code>）。
+            请求经内置代理转发到 <code>{"{Base URL}"}/images/generations</code>（或图生图的 <code>/images/edits</code>），因此无需接口支持浏览器跨域 (CORS)。
           </p>
         </section>
 

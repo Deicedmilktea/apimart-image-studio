@@ -36,6 +36,11 @@ export interface CustomResult {
   images: string[];
 }
 
+// Custom-channel requests are relayed through our same-origin serverless proxy
+// so endpoints that don't allow browser CORS still work. The real target is
+// passed in the x-target-url header; the proxy stores nothing.
+const PROXY_PATH = "/api/proxy";
+
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
 }
@@ -126,42 +131,47 @@ async function parseImagesResponse(res: Response): Promise<string[]> {
 }
 
 async function postJson(
-  url: string,
+  targetUrl: string,
   apiKey: string,
   body: unknown,
 ): Promise<Response> {
   try {
-    return await fetch(url, {
+    return await fetch(PROXY_PATH, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         Accept: "application/json",
+        "x-target-url": targetUrl,
       },
       body: JSON.stringify(body),
     });
   } catch (err) {
     throw new CustomImagegenError(
-      `无法连接自定义接口：${err instanceof Error ? err.message : String(err)}。请检查 URL 是否正确且允许跨域 (CORS)。`,
+      `无法连接自定义接口：${err instanceof Error ? err.message : String(err)}。请检查 URL 是否正确。`,
       502,
     );
   }
 }
 
 async function postForm(
-  url: string,
+  targetUrl: string,
   apiKey: string,
   form: FormData,
 ): Promise<Response> {
   try {
-    return await fetch(url, {
+    return await fetch(PROXY_PATH, {
       method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+        "x-target-url": targetUrl,
+      },
       body: form,
     });
   } catch (err) {
     throw new CustomImagegenError(
-      `无法连接自定义接口：${err instanceof Error ? err.message : String(err)}。请检查 URL 是否正确且允许跨域 (CORS)。`,
+      `无法连接自定义接口：${err instanceof Error ? err.message : String(err)}。请检查 URL 是否正确。`,
       502,
     );
   }
