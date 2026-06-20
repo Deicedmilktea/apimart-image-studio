@@ -1,127 +1,62 @@
-# 🎨 图片工作室
+# 🎨 图片工作室（云端 / 纯前端版）
 
-一个像 ChatGPT 网页端那样的可视化生图页面：输入提示词 → 选择参数 → 点击生成 → 查看 / 下载图片。
+一个像 ChatGPT 网页端一样的可视化生图界面：输入提示词 → 选参数 → 点生成 → 查看 / 下载图片。
 
-当前支持两条生成链路：
+> 这是部署到 Vercel 的 **纯前端分支**。没有任何后端：用户在「设置」里填自己的 Key / URL，全部存在浏览器本地，请求直接发往对应的图片服务。生成的图片与历史记录也都缓存在浏览器里。
+>
+> 需要本地全栈版（含官方 `image_gen.py` 通道、服务端落盘等）请看 `main` 分支。
 
-- [APIMart](https://docs.apimart.ai) 的 `gpt-image-2` 异步图片生成 API
-- 自定义 `URL + Key` 的 OpenAI 兼容服务，经过 TypeScript 包装器转调官方 `image_gen.py`
+## 两个生图通道
 
-## 界面预览
-
-![图片工作室界面预览](public/readme-preview.png)
+- **APIMart**：`gpt-image-2` 的异步生图 API（提交任务 → 轮询 → 拿结果）。
+- **自定义 URL/Key（OpenAI 兼容）**：浏览器直接调用你填写的 `Base URL + Key + 模型`，走标准的 `/images/generations` 与 `/images/edits`（图生图）。
 
 ## 特性
 
 - **文生图 / 图生图**：支持上传参考图（最多 16 张，自动转 base64）。
-- **多通道切换**：可在 APIMart 与自定义 URL/Key 之间切换。
-- **模型与参数**：
-  - APIMart：`gpt-image-2`（标准）/ `gpt-image-2-official`（官方通道）；可选比例（13 种）、分辨率（官方通道 1k/2k/4k）、官方通道回退。
-  - 自定义 URL/Key：调用官方 `image_gen.py`，支持比例与 `quality`（`low / medium / high / auto`）。
-- **异步轮询**：提交后自动轮询任务状态，完成后展示图片。
-- **服务端自动落盘**：任务完成后，后端会把图片下载保存到本地目录（默认 `generated/`），不依赖 24h 链接、清缓存也不丢；页面会显示保存目录与文件名。
-- **本地历史**：生成记录保存在浏览器 `localStorage`，可回看 / 下载。
-- **密钥安全**：API Key 只存在于服务端（Next.js Route Handler 代理），不会暴露给浏览器。
+- **多通道切换**：在 APIMart 与自定义 URL/Key 之间切换。
+- **自带 Key（BYOK）**：所有 Key / URL 只存在浏览器 `localStorage`，请求直连服务，不经过任何后端。
+- **本地持久化**：
+  - 历史记录元数据存浏览器 `localStorage`。
+  - 图片字节存浏览器 **IndexedDB**。APIMart 的图片链接约 24 小时过期，完成时会把图片字节缓存到本地，过期后依然能看 / 下载。
+- **参数**：
+  - APIMart：模型（标准 / 官方通道）、比例、分辨率（官方通道支持 1k/2k/4k）。
+  - 自定义：质量（low / medium / high / auto），比例会映射成固定尺寸（21:9 / 9:21 暂不可用）。
 
 ## 架构
 
 ```
-浏览器(UI) ──prompt/provider──▶ /api/generate
-                                   ├─ APIMart ──▶ POST /v1/images/generations ──▶ task_id ──▶ /api/task/[id] 轮询
-                                   └─ local-imagegen ──▶ TS 包装器 ──▶ 官方 image_gen.py ──▶ 本地输出文件
+浏览器 (UI)
+  ├─ APIMart 通道 ──▶ POST {baseURL}/images/generations ──▶ task_id
+  │                   └▶ 轮询 GET {baseURL}/tasks/{id} ──▶ 图片 URL ──▶ 缓存进 IndexedDB
+  └─ 自定义通道 ────▶ POST {baseURL}/images/generations | /images/edits ──▶ b64 ──▶ IndexedDB
 ```
 
-- 服务端逻辑：
-  - `src/lib/apimart.ts`：APIMart 提交、轮询、解析响应
-  - `src/lib/localImagegen.ts`：读取 env、调用官方 `image_gen.py`
-- API 路由：`src/app/api/generate/route.ts`、`src/app/api/task/[id]/route.ts`。
-- 前端：`src/components/ImageStudio.tsx`。
+- `src/lib/apimart.ts`：APIMart 提交 / 轮询 / 响应解析（纯客户端）。
+- `src/lib/customImagegen.ts`：自定义 OpenAI 兼容通道的 generate / edit。
+- `src/lib/config.ts`：读写浏览器里的 Key / URL 配置。
+- `src/lib/imageDb.ts`：IndexedDB 图片缓存。
+- `src/components/ImageStudio.tsx`：前端主界面 + 设置弹窗。
 
 ## 本地运行
 
 ```bash
-cp .env.example .env.local
 npm install
-uv sync
-npm run dev                  # http://localhost:3000
+npm run dev   # http://localhost:3000
 ```
 
-如果你只使用 APIMart，可以不执行 `uv sync`。  
-如果你要启用 `自定义 URL/Key`，建议把 Python 依赖也准备好：
-
-```bash
-uv sync
-```
-
-这会在项目根目录创建 `.venv/`，并安装本项目声明的 Python 依赖（当前为 `openai` 和 `pillow`）。
-
-## 环境变量
-
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `APIMART_API_KEY` | 否 | 使用 APIMart 时必填 |
-| `APIMART_BASE_URL` | 否 | 默认 `https://api.apimart.ai/v1` |
-| `LOCAL_IMAGEGEN_BASE_URL` | 否 | 使用自定义 URL/Key 时必填，直接映射到子进程 `OPENAI_BASE_URL` |
-| `LOCAL_IMAGEGEN_API_KEY` | 否 | 使用自定义 URL/Key 时必填，直接映射到子进程 `OPENAI_API_KEY` |
-| `OFFICIAL_IMAGEGEN_PATH` | 否 | 默认 `~/.codex/skills/.system/imagegen/scripts/image_gen.py` |
-| `IMAGE_STUDIO_OUTPUT_DIR` | 否 | 图片自动保存目录，默认 `generated`（相对路径基于项目根目录） |
-| `APIMART_OUTPUT_DIR` | 否 | 旧变量名，仍兼容，优先级低于 `IMAGE_STUDIO_OUTPUT_DIR` |
+启动后点右上角「设置」填入 Key / URL 即可使用，无需任何 `.env`。
 
 ## 部署到 Vercel
 
-如果你只使用 APIMart，导入仓库后在 Project Settings → Environment Variables 中添加 `APIMART_API_KEY` 即可。
+直接导入仓库、选择本分支部署即可，**不需要配置任何环境变量**。
 
-如果你还要启用自定义 URL/Key，额外配置：
+- 应用没有 API 路由，`/` 是纯静态页面，Vercel 不会创建任何 Serverless Function。
+- 用户首次访问后在「设置」里填自己的 Key / URL 即可开始生图。
 
-- `LOCAL_IMAGEGEN_BASE_URL`
-- `LOCAL_IMAGEGEN_API_KEY`
-- 如有需要，再配置 `OFFICIAL_IMAGEGEN_PATH`
+## 注意
 
-并确保部署环境在构建前执行过：
-
-```bash
-uv sync
-```
-
-如果你是自托管部署，推荐在启动前先执行：
-
-```bash
-npm install
-uv sync
-npm run build
-npm run start
-```
-
-注意：Vercel 这类无持久文件系统平台并不适合依赖本地文件产物的长期保存；自定义 URL/Key + 官方 `image_gen.py` 更推荐用于本地或自托管环境。
-
-## Python 依赖与 `uv`
-
-项目根目录包含一个 `pyproject.toml`，专门声明 `local-imagegen` 所需的 Python 依赖：
-
-- `openai`
-- `pillow`
-
-服务端调用 `image_gen.py` 时，运行顺序如下：
-
-1. 优先使用项目根目录 `.venv/bin/python`
-2. 再尝试官方 imagegen skill 自带的 `.venv`
-3. 如果仓库存在 `pyproject.toml` 且系统安装了 `uv`，则使用 `uv run python3`
-4. 最后才回退到一次性的 `uv run --with openai --with pillow python3`
-
-也就是说，开源使用时的推荐方式不是依赖临时回退，而是：
-
-```bash
-uv sync
-```
-
-把 Python 环境作为项目依赖的一部分固定下来。
-
-## 说明
-
-- APIMart 生成的图片链接 **24 小时内有效**；本应用会在任务完成时自动把图片保存到服务端 `IMAGE_STUDIO_OUTPUT_DIR`（默认 `generated/`），即使链接过期本地副本仍在。该目录已加入 `.gitignore`，不会被提交。
-- 注意：服务端落盘发生在运行 Next.js 的机器上。本地 `npm run dev` 时即你自己的电脑；部署到 Vercel 等无持久文件系统的平台时，落盘文件不会持久保留，此功能主要适用于本地 / 自托管运行。
-- `gpt-image-2` 比例不要传 `auto`；想用默认比例就不选（留空）。
-- 分辨率 `4k` 仅支持 `16:9 / 9:16 / 2:1 / 1:2 / 21:9 / 9:21`，且只在官方通道模型下可用。
-- 自定义 URL/Key 模式会把比例映射成固定尺寸，再传给官方 `image_gen.py`。首版禁用 `21:9` 和 `9:21`。
-- 自定义 URL/Key 模式当前只暴露最小参数集：`prompt / 参考图 / 比例 / quality`。
-- 如果你启用了自定义 URL/Key，但没有准备 Python 依赖，服务端会优先提示你执行 `uv sync`。
+- **自定义通道依赖 CORS**：能否在浏览器直连取决于你填的那个 endpoint 是否允许跨域。OpenAI 官方支持；部分第三方代理可能未开启 CORS，会连接失败。
+- 自定义 URL/Key 模式仅暴露少量参数：prompt / 参考图 / 比例 / quality / 模型名。
+- 自定义通道的比例会映射成固定尺寸（如 `1:1`→`1024x1024`），具体是否被接受取决于你的 endpoint 与模型。
+- Key 存在浏览器属于常规 BYOK 方案，请在可信设备 / 浏览器上使用。

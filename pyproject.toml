@@ -1,9 +1,0 @@
-[project]
-name = "apimart-image-studio-imagegen"
-version = "0.1.0"
-description = "Python dependencies for the local imagegen wrapper"
-requires-python = ">=3.11"
-dependencies = [
-  "openai>=1.0.0",
-  "pillow>=10.0.0",
-]

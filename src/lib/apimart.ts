@@ -1,7 +1,9 @@
-// Server-side helpers for talking to the APIMart image generation API.
-// Ported from the user's apimart_gpt_image_2.py CLI skill.
+// Client-side helpers for talking to the APIMart image generation API directly
+// from the browser. The user supplies their own API key (stored locally), which
+// is sent straight to APIMart; nothing is proxied through a backend.
 
 import {
+  DEFAULT_APIMART_BASE_URL,
   FOUR_K_SUPPORTED_SIZES,
   MAX_REFERENCE_IMAGES,
   OFFICIAL_IMAGE_MODEL,
@@ -15,10 +17,12 @@ import {
 } from "@/lib/constants";
 import type { GenerateRequest } from "@/lib/types";
 
-export const DEFAULT_BASE_URL = "https://api.apimart.ai/v1";
+export const DEFAULT_BASE_URL = DEFAULT_APIMART_BASE_URL;
 
-const BROWSER_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+export interface ApimartCredentials {
+  apiKey: string;
+  baseUrl?: string;
+}
 
 export class ApimartError extends Error {
   status: number;
@@ -39,19 +43,23 @@ export interface GeneratePayload {
   resolution?: ImageResolution;
 }
 
-function getBaseUrl(): string {
-  return process.env.APIMART_BASE_URL?.trim() || DEFAULT_BASE_URL;
+function normalizeBaseUrl(baseUrl?: string): string {
+  const trimmed = baseUrl?.trim();
+  return (trimmed || DEFAULT_BASE_URL).replace(/\/+$/, "");
 }
 
-function requireApiKey(): string {
-  const key = process.env.APIMART_API_KEY;
-  if (!key) {
+function requireCredentials(credentials: ApimartCredentials): {
+  apiKey: string;
+  baseUrl: string;
+} {
+  const apiKey = credentials.apiKey?.trim();
+  if (!apiKey) {
     throw new ApimartError(
-      "服务端未配置 APIMART_API_KEY。请在 .env.local 中设置后重启。",
-      500,
+      "未配置 APIMart API Key。请点击右上角「设置」填写后再试。",
+      400,
     );
   }
-  return key;
+  return { apiKey, baseUrl: normalizeBaseUrl(credentials.baseUrl) };
 }
 
 export function buildGenerationPayload(req: GenerateRequest): GeneratePayload {
@@ -116,7 +124,6 @@ async function apiRequestJson(
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
     Accept: "application/json",
-    "User-Agent": BROWSER_USER_AGENT,
   };
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
@@ -208,15 +215,18 @@ export function extractImageUrls(response: Record<string, unknown>): string[] {
   return urls;
 }
 
-export async function submitGeneration(payload: GeneratePayload): Promise<{
+export async function submitGeneration(
+  payload: GeneratePayload,
+  credentials: ApimartCredentials,
+): Promise<{
   taskId: string;
   status: string;
   raw: Record<string, unknown>;
 }> {
-  const apiKey = requireApiKey();
+  const { apiKey, baseUrl } = requireCredentials(credentials);
   const response = await apiRequestJson(
     "POST",
-    `${getBaseUrl()}/images/generations`,
+    `${baseUrl}/images/generations`,
     apiKey,
     payload,
   );
@@ -232,9 +242,13 @@ export interface TaskResult {
   raw: Record<string, unknown>;
 }
 
-export async function getTaskStatus(taskId: string, language = "en"): Promise<TaskResult> {
-  const apiKey = requireApiKey();
-  const url = `${getBaseUrl()}/tasks/${encodeURIComponent(taskId)}?language=${encodeURIComponent(language)}`;
+export async function getTaskStatus(
+  taskId: string,
+  credentials: ApimartCredentials,
+  language = "en",
+): Promise<TaskResult> {
+  const { apiKey, baseUrl } = requireCredentials(credentials);
+  const url = `${baseUrl}/tasks/${encodeURIComponent(taskId)}?language=${encodeURIComponent(language)}`;
   const response = await apiRequestJson("GET", url, apiKey);
   return {
     taskId,
