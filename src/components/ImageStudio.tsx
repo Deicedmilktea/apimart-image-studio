@@ -393,7 +393,7 @@ export default function ImageStudio() {
   }, [persistHistory]);
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:flex-row lg:items-start">
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:min-h-0 lg:flex-row lg:items-stretch">
       <button
         type="button"
         onClick={() => setSettingsOpen(true)}
@@ -416,7 +416,7 @@ export default function ImageStudio() {
       ) : null}
 
       {/* Main column */}
-      <div className="flex flex-1 flex-col gap-5">
+      <div className="flex flex-1 flex-col gap-5 lg:min-h-0">
         <ResultArea phase={phase} statusText={statusText} error={error} images={images} />
 
         {/* Composer */}
@@ -907,7 +907,7 @@ function ResultArea({
   images: StoredImage[];
 }) {
   return (
-    <div className="flex min-h-[430px] flex-1 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+    <div className="flex min-h-[430px] flex-1 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4 lg:min-h-0">
       {phase === "error" ? (
         <div
           className="flex flex-1 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center text-sm text-red-300"
@@ -922,7 +922,7 @@ function ResultArea({
         </div>
       ) : images.length > 0 ? (
         <div
-          className={`grid flex-1 gap-3 ${
+          className={`grid min-h-0 flex-1 auto-rows-fr gap-3 ${
             images.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"
           }`}
           data-testid="result-grid"
