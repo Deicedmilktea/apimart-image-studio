@@ -6,7 +6,6 @@ import {
   DEFAULT_LOCAL_IMAGEGEN_QUALITY,
   FOUR_K_SUPPORTED_SIZES,
   LOCAL_IMAGEGEN_DISABLED_SIZES,
-  LOCAL_IMAGEGEN_MODEL_LABEL,
   LOCAL_IMAGEGEN_MODEL_HINT,
   LOCAL_IMAGEGEN_PROVIDER,
   LOCAL_IMAGEGEN_QUALITIES,
@@ -22,13 +21,28 @@ import {
   type ImageProvider,
   type LocalImageQuality,
 } from "@/lib/constants";
-import type {
-  GenerateResponse,
-  HistoryItem,
-  ReferenceImage,
-  SavedImageInfo,
-  TaskResponse,
-} from "@/lib/types";
+import {
+  ApimartError,
+  buildGenerationPayload,
+  getTaskStatus,
+  submitGeneration,
+} from "@/lib/apimart";
+import { CustomImagegenError, generateWithCustom } from "@/lib/customImagegen";
+import {
+  cacheBlob,
+  cacheRemoteImage,
+  clearImages,
+  dataUrlToBlob,
+  deleteImages,
+  getImage,
+} from "@/lib/imageDb";
+import {
+  type AppConfig,
+  defaultConfig,
+  loadConfig,
+  saveConfig,
+} from "@/lib/config";
+import type { HistoryItem, ReferenceImage, StoredImage } from "@/lib/types";
 
 const HISTORY_KEY = "apimart-image-studio:history";
 const POLL_INTERVAL_MS = 3000;
@@ -49,12 +63,50 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-async function downloadImage(url: string, filename: string) {
-  try {
-    const res = await fetch(url, { mode: "cors" });
-    if (!res.ok) throw new Error(String(res.status));
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
+function imageIds(images: StoredImage[]): string[] {
+  return images.map((img) => img.id).filter((id): id is string => Boolean(id));
+}
+
+// Resolves a StoredImage to a usable <img> src: prefers the locally cached
+// bytes (IndexedDB), falling back to the original remote URL.
+function useImageSrc(image: StoredImage): string | undefined {
+  const [objectUrl, setObjectUrl] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!image.id) return;
+    let cancelled = false;
+    let created: string | undefined;
+
+    getImage(image.id)
+      .then((blob) => {
+        if (cancelled || !blob) return;
+        created = URL.createObjectURL(blob);
+        setObjectUrl(created);
+      })
+      .catch(() => {
+        // Fall back to the remote URL below.
+      });
+
+    return () => {
+      cancelled = true;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [image.id]);
+
+  return objectUrl ?? image.url;
+}
+
+async function blobUrlForImage(image: StoredImage): Promise<string | undefined> {
+  if (image.id) {
+    const blob = await getImage(image.id);
+    if (blob) return URL.createObjectURL(blob);
+  }
+  return undefined;
+}
+
+async function downloadStoredImage(image: StoredImage, filename: string) {
+  const objectUrl = await blobUrlForImage(image);
+  if (objectUrl) {
     const a = document.createElement("a");
     a.href = objectUrl;
     a.download = filename;
@@ -62,48 +114,24 @@ async function downloadImage(url: string, filename: string) {
     a.click();
     a.remove();
     URL.revokeObjectURL(objectUrl);
-  } catch {
-    // Cross-origin download may be blocked; fall back to opening in a new tab.
-    window.open(url, "_blank", "noopener,noreferrer");
+    return;
   }
-}
-
-// Local readback URL for an image that was auto-saved on the server, matched by
-// its original APIMart URL. Returns undefined if no local copy is known.
-function localUrlForImage(
-  url: string,
-  saved?: SavedImageInfo[],
-): string | undefined {
-  const match = saved?.find((s) => s.url === url);
-  return match ? `/api/image/${encodeURIComponent(match.filename)}` : undefined;
-}
-
-// <img> that prefers a primary src (e.g. the local file) and falls back to a
-// secondary src (the online URL) if the primary fails to load. Callers should
-// pass a stable `key` so state resets when the primary changes.
-function PreviewImg({
-  primary,
-  fallback,
-  alt,
-  className,
-}: {
-  primary: string;
-  fallback: string;
-  alt: string;
-  className?: string;
-}) {
-  const [src, setSrc] = useState(primary);
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={alt}
-      className={className}
-      onError={() => {
-        if (src !== fallback) setSrc(fallback);
-      }}
-    />
-  );
+  if (!image.url) return;
+  try {
+    const res = await fetch(image.url, { mode: "cors" });
+    if (!res.ok) throw new Error(String(res.status));
+    const blob = await res.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(blobUrl);
+  } catch {
+    window.open(image.url, "_blank", "noopener,noreferrer");
+  }
 }
 
 function sanitizeLocalImagegenSize(size?: string): string {
@@ -127,18 +155,27 @@ export default function ImageStudio() {
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [statusText, setStatusText] = useState<string>("");
-  const [images, setImages] = useState<string[]>([]);
-  const [saved, setSaved] = useState<SavedImageInfo[]>([]);
-  const [savedDir, setSavedDir] = useState<string>("");
+  const [images, setImages] = useState<StoredImage[]>([]);
   const [error, setError] = useState<string>("");
   const [history, setHistory] = useState<HistoryItem[]>([]);
+
+  const [config, setConfig] = useState<AppConfig>(defaultConfig());
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const cancelRef = useRef(false);
   const busy = phase === "submitting" || phase === "polling";
 
   useEffect(() => {
-    // Read persisted history after mount (avoids SSR/localStorage hydration
-    // mismatch). Deferred to a microtask so it isn't a synchronous effect setState.
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) setConfig(loadConfig());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     void Promise.resolve().then(() => {
       if (cancelled) return;
@@ -147,10 +184,12 @@ export default function ImageStudio() {
         if (raw) {
           const parsed = JSON.parse(raw) as HistoryItem[];
           setHistory(
-            parsed.map((item) => ({
-              ...item,
-              provider: item.provider ?? APIMART_PROVIDER,
-            })),
+            parsed
+              .filter((item) => Array.isArray(item.images))
+              .map((item) => ({
+                ...item,
+                provider: item.provider ?? APIMART_PROVIDER,
+              })),
           );
         }
       } catch {
@@ -176,6 +215,10 @@ export default function ImageStudio() {
   const isLocalImagegen = provider === LOCAL_IMAGEGEN_PROVIDER;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+  const providerConfigured = isApimart
+    ? Boolean(config.apimartApiKey)
+    : Boolean(config.customBaseUrl && config.customApiKey && config.customModel);
+
   const handleReferenceFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const incoming: ReferenceImage[] = [];
@@ -199,9 +242,17 @@ export default function ImageStudio() {
     setPhase("idle");
     setError("");
     setStatusText("");
-    setSaved([]);
-    setSavedDir("");
   };
+
+  const finish = useCallback(
+    (stored: StoredImage[], item: HistoryItem) => {
+      setImages(stored);
+      setPhase("done");
+      setStatusText("");
+      persistHistory([item, ...history.filter((h) => h.id !== item.id)]);
+    },
+    [history, persistHistory],
+  );
 
   const generate = useCallback(async () => {
     const trimmed = prompt.trim();
@@ -210,62 +261,57 @@ export default function ImageStudio() {
     cancelRef.current = false;
     setError("");
     setImages([]);
-    setSaved([]);
-    setSavedDir("");
     setPhase("submitting");
     setStatusText("正在提交任务…");
 
-    try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          prompt: trimmed,
-          model: isApimart ? model : undefined,
-          size: size || undefined,
-          resolution: isApimart && isOfficial ? resolution || undefined : undefined,
-          officialFallback: isApimart && !isOfficial ? officialFallback : undefined,
-          quality: isLocalImagegen ? quality : undefined,
-          imageUrls: references.map((r) => r.dataUrl),
-        }),
-      });
-      const data = (await res.json()) as GenerateResponse;
-      if (!res.ok || !data.taskId) {
-        throw new Error(data.error || `提交失败 (HTTP ${res.status})`);
-      }
-      if (cancelRef.current) return;
+    const request = {
+      provider,
+      prompt: trimmed,
+      model: isApimart ? model : undefined,
+      size: size || undefined,
+      resolution: isApimart && isOfficial ? resolution || undefined : undefined,
+      officialFallback: isApimart && !isOfficial ? officialFallback : undefined,
+      quality: isLocalImagegen ? quality : undefined,
+      imageUrls: references.map((r) => r.dataUrl),
+    };
 
-      if (data.status === "completed") {
-        const urls = data.images ?? [];
-        if (urls.length === 0) throw new Error("任务完成但没有返回图片 URL。");
-        const savedFiles = data.saved ?? [];
-        const dir = data.savedDir ?? "";
-        setImages(urls);
-        setSaved(savedFiles);
-        setSavedDir(dir);
-        setPhase("done");
-        setStatusText("");
-        persistHistory([
-          {
-            id: data.taskId,
-            prompt: trimmed,
-            provider,
-            model: isApimart ? model : undefined,
-            modelLabel: isApimart ? MODEL_LABELS[model] : LOCAL_IMAGEGEN_MODEL_LABEL,
-            quality: isLocalImagegen ? quality : undefined,
-            size: size || undefined,
-            images: urls,
-            createdAt: Date.now(),
-            savedDir: dir || undefined,
-            saved: savedFiles.length > 0 ? savedFiles : undefined,
-          },
-          ...history.filter((h) => h.id !== data.taskId),
-        ]);
+    try {
+      if (isLocalImagegen) {
+        setStatusText("正在生成图片…");
+        const result = await generateWithCustom(request, {
+          baseUrl: config.customBaseUrl,
+          apiKey: config.customApiKey,
+          model: config.customModel,
+        });
+        if (cancelRef.current) return;
+        const stored: StoredImage[] = await Promise.all(
+          result.images.map(async (dataUrl) => {
+            const id = await cacheBlob(dataUrlToBlob(dataUrl));
+            return id ? { id } : { url: dataUrl };
+          }),
+        );
+        if (cancelRef.current) return;
+        finish(stored, {
+          id: uid(),
+          prompt: trimmed,
+          provider,
+          modelLabel: config.customModel,
+          quality,
+          size: size || undefined,
+          images: stored,
+          createdAt: Date.now(),
+        });
         return;
       }
 
-      const taskId = data.taskId;
+      const credentials = {
+        apiKey: config.apimartApiKey,
+        baseUrl: config.apimartBaseUrl,
+      };
+      const payload = buildGenerationPayload(request);
+      const { taskId } = await submitGeneration(payload, credentials);
+      if (cancelRef.current) return;
+
       setPhase("polling");
       setStatusText("已提交，正在生成图片…");
 
@@ -275,52 +321,46 @@ export default function ImageStudio() {
         await sleep(POLL_INTERVAL_MS);
         if (cancelRef.current) return;
 
-        const taskRes = await fetch(`/api/task/${encodeURIComponent(taskId)}`, {
-          cache: "no-store",
-        });
-        const task = (await taskRes.json()) as TaskResponse;
-        if (!taskRes.ok) throw new Error(task.error || `查询失败 (HTTP ${taskRes.status})`);
-
-        const status = task.status ?? "";
+        const task = await getTaskStatus(taskId, credentials);
+        const status = task.status || "";
         setStatusText(`生成中… (状态: ${status || "处理中"})`);
 
         if (status === "completed") {
-          const urls = task.images ?? [];
+          const urls = task.images;
           if (urls.length === 0) throw new Error("任务完成但没有返回图片 URL。");
-          const savedFiles = task.saved ?? [];
-          const dir = task.savedDir ?? "";
-          setImages(urls);
-          setSaved(savedFiles);
-          setSavedDir(dir);
-          setPhase("done");
-          setStatusText("");
-          persistHistory([
-            {
-              id: taskId,
-              prompt: trimmed,
-              provider,
-              model,
-              modelLabel: MODEL_LABELS[model],
-              size: size || undefined,
-              images: urls,
-              createdAt: Date.now(),
-              savedDir: dir || undefined,
-              saved: savedFiles.length > 0 ? savedFiles : undefined,
-            },
-            ...history.filter((h) => h.id !== taskId),
-          ]);
+          const stored: StoredImage[] = await Promise.all(
+            urls.map(async (url) => {
+              const id = await cacheRemoteImage(url);
+              return { id, url };
+            }),
+          );
+          if (cancelRef.current) return;
+          finish(stored, {
+            id: taskId,
+            prompt: trimmed,
+            provider,
+            model,
+            modelLabel: MODEL_LABELS[model],
+            size: size || undefined,
+            images: stored,
+            createdAt: Date.now(),
+          });
           return;
         }
         if (status === "failed") {
           throw new Error(task.error || "任务失败。");
         }
       }
-      throw new Error("生成超时，请稍后用任务记录重试。");
+      throw new Error("生成超时，请稍后重试。");
     } catch (err) {
       if (cancelRef.current) return;
       setPhase("error");
       setStatusText("");
-      setError(err instanceof Error ? err.message : "未知错误");
+      if (err instanceof ApimartError || err instanceof CustomImagegenError) {
+        setError(err.message);
+      } else {
+        setError(err instanceof Error ? err.message : "未知错误");
+      }
     }
   }, [
     prompt,
@@ -335,22 +375,53 @@ export default function ImageStudio() {
     officialFallback,
     quality,
     references,
-    history,
-    persistHistory,
+    config,
+    finish,
   ]);
 
+  const handleDeleteHistory = useCallback(
+    (item: HistoryItem) => {
+      void deleteImages(imageIds(item.images));
+      persistHistory(history.filter((h) => h.id !== item.id));
+    },
+    [history, persistHistory],
+  );
+
+  const handleClearHistory = useCallback(() => {
+    void clearImages();
+    persistHistory([]);
+  }, [persistHistory]);
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:flex-row lg:items-start">
-      {/* Main column */}
-      <div className="flex flex-1 flex-col gap-5">
-        <ResultArea
-          phase={phase}
-          statusText={statusText}
-          error={error}
-          images={images}
-          saved={saved}
-          savedDir={savedDir}
+    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:min-h-0 lg:flex-row lg:items-stretch">
+      <div className="pointer-events-none fixed inset-x-0 top-3 z-30 px-4">
+        <div className="mx-auto flex w-full max-w-6xl justify-end">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white/70 shadow backdrop-blur hover:bg-white/10"
+            data-testid="open-settings"
+          >
+            <span aria-hidden>⚙</span> 设置
+          </button>
+        </div>
+      </div>
+
+      {settingsOpen ? (
+        <SettingsModal
+          config={config}
+          onClose={() => setSettingsOpen(false)}
+          onSave={(next) => {
+            saveConfig(next);
+            setConfig(next);
+            setSettingsOpen(false);
+          }}
         />
+      ) : null}
+
+      {/* Main column */}
+      <div className="flex flex-1 flex-col gap-5 lg:min-h-0">
+        <ResultArea phase={phase} statusText={statusText} error={error} images={images} />
 
         {/* Composer */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-lg">
@@ -418,14 +489,14 @@ export default function ImageStudio() {
             ) : (
               <Field label="模型">
                 <select
-                  value={LOCAL_IMAGEGEN_MODEL_LABEL}
+                  value={config.customModel || "未配置"}
                   disabled
                   className="select w-[10.5rem] max-w-[calc(100vw-4rem)]"
                   data-testid="local-imagegen-model"
                   title={LOCAL_IMAGEGEN_MODEL_HINT}
                 >
-                  <option value={LOCAL_IMAGEGEN_MODEL_LABEL} className="bg-zinc-900">
-                    {LOCAL_IMAGEGEN_MODEL_LABEL}
+                  <option value={config.customModel || "未配置"} className="bg-zinc-900">
+                    {config.customModel || "未配置"}
                   </option>
                 </select>
               </Field>
@@ -537,21 +608,29 @@ export default function ImageStudio() {
           <p className="mt-2 text-xs text-white/30">
             提示：Ctrl / ⌘ + Enter 快速生成。
             {isLocalImagegen
-              ? " 自定义 URL/Key 会固定调用官方 imagegen 脚本，并把比例映射成固定尺寸，21:9 和 9:21 暂不可用。"
-              : " 图片链接 24 小时内有效，请及时下载。"}
+              ? " 自定义 URL/Key 经内置代理调用 OpenAI 兼容接口，比例会映射成固定尺寸，21:9 和 9:21 暂不可用。"
+              : " 生成的图片会缓存到本地浏览器，链接过期也不丢。"}
           </p>
+          {!providerConfigured ? (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="mt-2 text-xs text-amber-300/90 hover:text-amber-200"
+              data-testid="config-warning"
+            >
+              ⚠ 当前通道还没有配置 Key / URL，点击这里前往「设置」。
+            </button>
+          ) : null}
         </div>
       </div>
 
       {/* History */}
       <HistoryPanel
         history={history}
-        onClear={() => persistHistory([])}
-        onDelete={(id) => persistHistory(history.filter((h) => h.id !== id))}
+        onClear={handleClearHistory}
+        onDelete={handleDeleteHistory}
         onSelect={(item) => {
           setImages(item.images);
-          setSaved(item.saved ?? []);
-          setSavedDir(item.savedDir ?? "");
           setPrompt(item.prompt);
           setProvider(item.provider);
           setSize(
@@ -567,7 +646,7 @@ export default function ImageStudio() {
           setPhase("done");
           setError("");
         }}
-        onDownload={downloadImage}
+        onDownload={downloadStoredImage}
       />
 
       {/* Component-scoped utility classes */}
@@ -585,6 +664,20 @@ export default function ImageStudio() {
           color: inherit;
           outline: none;
         }
+        .field-input {
+          width: 100%;
+          box-sizing: border-box;
+          border-radius: 0.5rem;
+          border: 1px solid rgba(255,255,255,0.15);
+          background: rgba(255,255,255,0.03);
+          padding: 0.5rem 0.65rem;
+          font-size: 0.875rem;
+          color: inherit;
+          outline: none;
+        }
+        .field-input:focus {
+          border-color: rgba(99,102,241,0.7);
+        }
       `}</style>
     </div>
   );
@@ -596,6 +689,134 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       {label}
       {children}
     </label>
+  );
+}
+
+function SettingsModal({
+  config,
+  onClose,
+  onSave,
+}: {
+  config: AppConfig;
+  onClose: () => void;
+  onSave: (config: AppConfig) => void;
+}) {
+  const [draft, setDraft] = useState<AppConfig>(config);
+
+  const set = (patch: Partial<AppConfig>) => setDraft((prev) => ({ ...prev, ...patch }));
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-zinc-950 p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        data-testid="settings-modal"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-base font-semibold">设置</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-2 py-1 text-white/50 hover:bg-white/5 hover:text-white/80"
+            aria-label="关闭"
+          >
+            ×
+          </button>
+        </div>
+
+        <p className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/50">
+          所有 Key / URL 只保存在你当前浏览器的本地存储里，不会上传到云端，无隐私顾虑。
+        </p>
+
+        <section className="mb-5">
+          <h3 className="mb-2 text-sm font-medium text-white/80">APIMart</h3>
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-xs text-white/50">
+              API Key
+              <input
+                type="password"
+                value={draft.apimartApiKey}
+                onChange={(e) => set({ apimartApiKey: e.target.value })}
+                placeholder="sk-..."
+                className="field-input"
+                data-testid="apimart-key-input"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-white/50">
+              Base URL
+              <input
+                type="text"
+                value={draft.apimartBaseUrl}
+                onChange={(e) => set({ apimartBaseUrl: e.target.value })}
+                placeholder="https://api.apimart.ai/v1"
+                className="field-input"
+                data-testid="apimart-url-input"
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="mb-5">
+          <h3 className="mb-2 text-sm font-medium text-white/80">自定义 URL/Key（OpenAI 兼容）</h3>
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1 text-xs text-white/50">
+              Base URL
+              <input
+                type="text"
+                value={draft.customBaseUrl}
+                onChange={(e) => set({ customBaseUrl: e.target.value })}
+                placeholder="https://your-endpoint.example.com/v1"
+                className="field-input"
+                data-testid="custom-url-input"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-white/50">
+              API Key
+              <input
+                type="password"
+                value={draft.customApiKey}
+                onChange={(e) => set({ customApiKey: e.target.value })}
+                placeholder="sk-..."
+                className="field-input"
+                data-testid="custom-key-input"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-white/50">
+              模型名
+              <input
+                type="text"
+                value={draft.customModel}
+                onChange={(e) => set({ customModel: e.target.value })}
+                placeholder="gpt-image-2"
+                className="field-input"
+                data-testid="custom-model-input"
+              />
+            </label>
+          </div>
+        </section>
+
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-white/15 px-4 py-2 text-sm text-white/70 hover:bg-white/5"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(draft)}
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+            data-testid="save-settings"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -649,23 +870,45 @@ function ReferenceStrip({
   );
 }
 
+function StudioImage({
+  image,
+  alt,
+  className,
+}: {
+  image: StoredImage;
+  alt: string;
+  className?: string;
+}) {
+  const src = useImageSrc(image);
+  if (!src) {
+    return <div className={className} />;
+  }
+  return (
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex h-full w-full items-center justify-center"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} className={className} />
+    </a>
+  );
+}
+
 function ResultArea({
   phase,
   statusText,
   error,
   images,
-  saved,
-  savedDir,
 }: {
   phase: Phase;
   statusText: string;
   error: string;
-  images: string[];
-  saved: SavedImageInfo[];
-  savedDir: string;
+  images: StoredImage[];
 }) {
   return (
-    <div className="flex min-h-[430px] flex-1 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+    <div className="flex min-h-[430px] flex-1 flex-col rounded-2xl border border-white/10 bg-white/[0.02] p-4 lg:min-h-0">
       {phase === "error" ? (
         <div
           className="flex flex-1 items-center justify-center rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center text-sm text-red-300"
@@ -679,55 +922,24 @@ function ResultArea({
           <p className="text-sm">{statusText}</p>
         </div>
       ) : images.length > 0 ? (
-        <div className="flex flex-1 flex-col gap-3">
-          <div
-            className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2"
-            data-testid="result-grid"
-          >
-            {images.map((url, i) => {
-              const local = localUrlForImage(url, saved);
-              const primary = local ?? url;
-              return (
-                <a
-                  key={`${url}-${i}`}
-                  href={primary}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
-                >
-                  <PreviewImg
-                    key={primary}
-                    primary={primary}
-                    fallback={url}
-                    alt={`生成结果 ${i + 1}`}
-                    className="h-full w-full object-contain transition group-hover:scale-[1.01]"
-                  />
-                </a>
-              );
-            })}
-          </div>
-          {saved.length > 0 ? (
+        <div
+          className={`grid min-h-0 flex-1 auto-rows-fr gap-3 ${
+            images.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"
+          }`}
+          data-testid="result-grid"
+        >
+          {images.map((image, i) => (
             <div
-              className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-2 text-xs text-emerald-200/90"
-              data-testid="saved-note"
+              key={image.id ?? image.url ?? i}
+              className="group relative flex min-h-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/30"
             >
-              <p className="font-medium">
-                已自动保存 {saved.length} 张图片到服务器：
-              </p>
-              {savedDir ? (
-                <p className="mt-1 break-all text-emerald-200/70">
-                  目录：<code>{savedDir}</code>
-                </p>
-              ) : null}
-              <ul className="mt-1 space-y-0.5 text-emerald-200/70">
-                {saved.map((s) => (
-                  <li key={s.filename} className="break-all">
-                    · {s.filename}
-                  </li>
-                ))}
-              </ul>
+              <StudioImage
+                image={image}
+                alt={`生成结果 ${i + 1}`}
+                className="max-h-full max-w-full object-contain transition group-hover:scale-[1.01]"
+              />
             </div>
-          ) : null}
+          ))}
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-white/30">
@@ -736,6 +948,17 @@ function ResultArea({
         </div>
       )}
     </div>
+  );
+}
+
+function HistoryThumb({ image, alt }: { image: StoredImage; alt: string }) {
+  const src = useImageSrc(image);
+  if (!src) {
+    return <div className="mb-2 h-24 w-full rounded-lg bg-white/[0.03]" />;
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} className="mb-2 h-24 w-full rounded-lg object-cover" />
   );
 }
 
@@ -748,9 +971,9 @@ function HistoryPanel({
 }: {
   history: HistoryItem[];
   onClear: () => void;
-  onDelete: (id: string) => void;
+  onDelete: (item: HistoryItem) => void;
   onSelect: (item: HistoryItem) => void;
-  onDownload: (url: string, filename: string) => void;
+  onDownload: (image: StoredImage, filename: string) => void;
 }) {
   const [confirmClear, setConfirmClear] = useState(false);
   return (
@@ -795,11 +1018,7 @@ function HistoryPanel({
       ) : (
         <ul className="flex max-h-[calc(100dvh-12rem)] flex-col gap-3 overflow-y-auto pr-1">
           {history.map((item) => {
-            const firstUrl = item.images[0];
-            const firstLocal = firstUrl
-              ? localUrlForImage(firstUrl, item.saved)
-              : undefined;
-            const firstPrimary = firstLocal ?? firstUrl ?? "";
+            const first = item.images[0];
             return (
               <li
                 key={item.id}
@@ -807,7 +1026,7 @@ function HistoryPanel({
               >
                 <button
                   type="button"
-                  onClick={() => onDelete(item.id)}
+                  onClick={() => onDelete(item)}
                   aria-label="删除这条记录"
                   title="删除"
                   className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/50 text-xs text-white/60 opacity-0 transition hover:bg-rose-500/80 hover:text-white group-hover:opacity-100"
@@ -819,15 +1038,7 @@ function HistoryPanel({
                   onClick={() => onSelect(item)}
                   className="block w-full text-left"
                 >
-                  {firstUrl ? (
-                    <PreviewImg
-                      key={firstPrimary}
-                      primary={firstPrimary}
-                      fallback={firstUrl}
-                      alt={item.prompt}
-                      className="mb-2 h-24 w-full rounded-lg object-cover"
-                    />
-                  ) : null}
+                  {first ? <HistoryThumb image={first} alt={item.prompt} /> : null}
                   <p className="line-clamp-2 text-xs text-white/60">
                     {item.prompt}
                   </p>
@@ -843,11 +1054,11 @@ function HistoryPanel({
                       {new Date(item.createdAt).toLocaleString()}
                     </span>
                   </div>
-                  {firstUrl ? (
+                  {first ? (
                     <button
                       type="button"
                       onClick={() =>
-                        onDownload(firstPrimary, `image-studio-${item.provider}-${item.id}.png`)
+                        onDownload(first, `image-studio-${item.provider}-${item.id}.png`)
                       }
                       className="text-[10px] text-indigo-300 hover:text-indigo-200"
                     >

@@ -4,6 +4,8 @@ export const APIMART_PROVIDER = "apimart";
 export const LOCAL_IMAGEGEN_PROVIDER = "local-imagegen";
 export const IMAGE_PROVIDERS = [APIMART_PROVIDER, LOCAL_IMAGEGEN_PROVIDER] as const;
 
+export const DEFAULT_APIMART_BASE_URL = "https://api.apimart.ai/v1";
+
 export const STANDARD_IMAGE_MODEL = "gpt-image-2";
 export const OFFICIAL_IMAGE_MODEL = "gpt-image-2-official";
 export const SUPPORTED_MODELS = [STANDARD_IMAGE_MODEL, OFFICIAL_IMAGE_MODEL] as const;
@@ -30,8 +32,8 @@ export const MAX_REFERENCE_IMAGES = 16;
 export const LOCAL_IMAGEGEN_QUALITIES = ["low", "medium", "high", "auto"] as const;
 export const DEFAULT_LOCAL_IMAGEGEN_QUALITY = "medium";
 export const LOCAL_IMAGEGEN_DISABLED_SIZES = ["21:9", "9:21"] as const;
-export const LOCAL_IMAGEGEN_MODEL_LABEL = "GPT-Image-2";
-export const LOCAL_IMAGEGEN_MODEL_HINT = "调用官方 imagegen 脚本";
+export const LOCAL_IMAGEGEN_MODEL_LABEL = "自定义模型";
+export const LOCAL_IMAGEGEN_MODEL_HINT = "在设置中配置 OpenAI 兼容的 URL / Key / 模型";
 export const LOCAL_IMAGEGEN_SIZE_MAP = {
   "1:1": "1024x1024",
   "3:2": "1536x1024",
@@ -60,5 +62,5 @@ export const MODEL_LABELS: Record<ImageModel, string> = {
 
 export const PROVIDER_LABELS: Record<ImageProvider, string> = {
   [APIMART_PROVIDER]: "APIMart",
-  [LOCAL_IMAGEGEN_PROVIDER]: "Local Imagen",
+  [LOCAL_IMAGEGEN_PROVIDER]: "自定义 URL/Key",
 };

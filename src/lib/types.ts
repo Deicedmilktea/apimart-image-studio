@@ -11,30 +11,12 @@ export interface GenerateRequest {
   quality?: string;
 }
 
-export interface GenerateResponse {
-  taskId?: string;
-  status?: string;
-  error?: string;
-  images?: string[];
-  saved?: SavedImageInfo[];
-  savedDir?: string;
-  provider?: ImageProvider;
-}
-
-export interface SavedImageInfo {
-  filename: string;
-  path: string;
-  url: string;
-}
-
-export interface TaskResponse {
-  taskId?: string;
-  status?: string;
-  images?: string[];
-  error?: string;
-  saved?: SavedImageInfo[];
-  savedDir?: string;
-  provider?: ImageProvider;
+// A generated image. `id` points at the bytes cached in IndexedDB; `url` is the
+// original remote URL (APIMart links expire ~24h) kept as a fallback when the
+// bytes could not be cached locally. At least one is always present.
+export interface StoredImage {
+  id?: string;
+  url?: string;
 }
 
 export interface ReferenceImage {
@@ -51,8 +33,6 @@ export interface HistoryItem {
   modelLabel?: string;
   quality?: LocalImageQuality;
   size?: string;
-  images: string[];
+  images: StoredImage[];
   createdAt: number;
-  savedDir?: string;
-  saved?: SavedImageInfo[];
 }
