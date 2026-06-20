@@ -7,7 +7,7 @@ import { DEFAULT_APIMART_BASE_URL } from "@/lib/constants";
 
 export const CONFIG_KEY = "apimart-image-studio:config";
 
-export const DEFAULT_CUSTOM_MODEL = "gpt-image-1";
+export const DEFAULT_CUSTOM_MODEL = "gpt-image-2";
 
 export interface AppConfig {
   apimartApiKey: string;

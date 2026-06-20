@@ -786,7 +786,7 @@ function SettingsModal({
                 type="text"
                 value={draft.customModel}
                 onChange={(e) => set({ customModel: e.target.value })}
-                placeholder="gpt-image-1"
+                placeholder="gpt-image-2"
                 className="field-input"
                 data-testid="custom-model-input"
               />
@@ -883,7 +883,12 @@ function StudioImage({
     return <div className={className} />;
   }
   return (
-    <a href={src} target="_blank" rel="noopener noreferrer" className="block h-full w-full">
+    <a
+      href={src}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex h-full w-full items-center justify-center"
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt={alt} className={className} />
     </a>
@@ -917,18 +922,20 @@ function ResultArea({
         </div>
       ) : images.length > 0 ? (
         <div
-          className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2"
+          className={`grid flex-1 gap-3 ${
+            images.length === 1 ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"
+          }`}
           data-testid="result-grid"
         >
           {images.map((image, i) => (
             <div
               key={image.id ?? image.url ?? i}
-              className="group relative overflow-hidden rounded-xl border border-white/10 bg-black/30"
+              className="group relative flex min-h-0 items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/30"
             >
               <StudioImage
                 image={image}
                 alt={`生成结果 ${i + 1}`}
-                className="h-full w-full object-contain transition group-hover:scale-[1.01]"
+                className="max-h-full max-w-full object-contain transition group-hover:scale-[1.01]"
               />
             </div>
           ))}
