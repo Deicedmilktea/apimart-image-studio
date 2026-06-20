@@ -394,14 +394,18 @@ export default function ImageStudio() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-6 lg:min-h-0 lg:flex-row lg:items-stretch">
-      <button
-        type="button"
-        onClick={() => setSettingsOpen(true)}
-        className="fixed right-4 top-3 z-30 flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white/70 shadow backdrop-blur hover:bg-white/10"
-        data-testid="open-settings"
-      >
-        <span aria-hidden>⚙</span> 设置
-      </button>
+      <div className="pointer-events-none fixed inset-x-0 top-3 z-30 px-4">
+        <div className="mx-auto flex w-full max-w-6xl justify-end">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="pointer-events-auto flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-white/70 shadow backdrop-blur hover:bg-white/10"
+            data-testid="open-settings"
+          >
+            <span aria-hidden>⚙</span> 设置
+          </button>
+        </div>
+      </div>
 
       {settingsOpen ? (
         <SettingsModal
@@ -724,7 +728,7 @@ function SettingsModal({
         </div>
 
         <p className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/50">
-          所有 Key / URL 只保存在你当前浏览器的本地存储里。APIMart 由浏览器直连；自定义通道经无状态代理转发（不落盘、Key 仅透传）。
+          所有 Key / URL 只保存在你当前浏览器的本地存储里，不会上传到云端，无隐私顾虑。
         </p>
 
         <section className="mb-5">
@@ -792,9 +796,6 @@ function SettingsModal({
               />
             </label>
           </div>
-          <p className="mt-2 text-xs text-white/30">
-            请求经内置代理转发到 <code>{"{Base URL}"}/images/generations</code>（或图生图的 <code>/images/edits</code>），因此无需接口支持浏览器跨域 (CORS)。
-          </p>
         </section>
 
         <div className="flex justify-end gap-2">
