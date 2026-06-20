@@ -604,7 +604,7 @@ export default function ImageStudio() {
           <p className="mt-2 text-xs text-white/30">
             提示：Ctrl / ⌘ + Enter 快速生成。
             {isLocalImagegen
-              ? " 自定义 URL/Key 直接调用 OpenAI 兼容接口，比例会映射成固定尺寸，21:9 和 9:21 暂不可用。"
+              ? " 自定义 URL/Key 经内置代理调用 OpenAI 兼容接口，比例会映射成固定尺寸，21:9 和 9:21 暂不可用。"
               : " 生成的图片会缓存到本地浏览器，链接过期也不丢。"}
           </p>
           {!providerConfigured ? (
@@ -724,7 +724,7 @@ function SettingsModal({
         </div>
 
         <p className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/50">
-          所有 Key / URL 只保存在你当前浏览器的本地存储里，请求直接发往对应服务，不会经过任何后端。
+          所有 Key / URL 只保存在你当前浏览器的本地存储里。APIMart 由浏览器直连；自定义通道经无状态代理转发（不落盘、Key 仅透传）。
         </p>
 
         <section className="mb-5">
